@@ -1,0 +1,29 @@
+{% extends "quizzes/base.html" %}
+
+{% block title %}
+<title>Administration - {{site_name}}</title>
+{% endblock %}
+
+{% block content %}
+    <h1>Administration</h1>
+    
+    {% if user.is_superuser %}
+        <h3>Create Courses </h3>
+            <a href="{% url 'create_course' %}" class="btn btn-success">
+                Add New Course
+            </a>
+    {% endif %}
+
+    {% if user.is_staff %}
+        <h3>Manage Users</h3>
+            <a href="{% url 'add_staff_member' %}" class="btn btn-success">
+                Add Staff Member
+            </a>
+            <a href="{% url 'add_students' %}" class="btn btn-success">
+                Add Students
+            </a>
+    {% endif %}
+{% endblock %}
+
+{% block sidenote %}
+{% endblock %}
