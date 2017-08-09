@@ -4,24 +4,24 @@ from . import views
 
 urlpatterns = [
     # Courses and Staff Admin (fold)
-    url(r'^quiz/courses/$',
+    url(r'^list_courses/$',
        views.courses,
        name='courses'
     ),
     # Admin begin
-    url(r'^quiz/administrative/$', 
+    url(r'^administrative/$', 
         views.administrative, 
         name='administrative'
     ),
-    url(r'^quiz/administrative/create_course/$', 
+    url(r'^administrative/create_course/$', 
         views.create_course, 
         name='create_course'
     ),
-    url(r'^quiz/administrative/add_staff_member/$', 
+    url(r'^administrative/add_staff_member/$', 
         views.add_staff_member, 
         name='add_staff_member'
     ),
-    url(r'^quiz/administrative/add_students/$', 
+    url(r'^administrative/add_students/$', 
         views.add_students, 
         name='add_students'
     ),
@@ -41,51 +41,51 @@ urlpatterns = [
     # Courses and Staff Admin (end)
 
     # Quizzes and Quiz Admin (fold)
-    url(r'^quiz/(?P<course_pk>\d+)/add_new_quiz', 
+    url(r'^course/(?P<course_pk>\d+)/add_new_quiz', 
         views.new_quiz, 
         name='new_quiz'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/edit_quiz/(?P<quiz_pk>\d+)/$', 
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/edit_quiz/$', 
         views.edit_quiz, 
         name='edit_quiz'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/list_quizzes/$',
+    url(r'^course/(?P<course_pk>\d+)/list_quizzes/$',
        views.list_quizzes,
        name='list_quizzes'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/start/(?P<quiz_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/start/(?P<quiz_pk>\d+)/$',
        views.start_quiz,
        name='start_quiz'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/display_question/(?P<sqr_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/display_question/(?P<sqr_pk>\d+)/$',
        views.display_question,
        name='display_question'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/display_question/(?P<sqr_pk>\d+)/(?P<submit>\w+)$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/display_question/(?P<sqr_pk>\d+)/(?P<submit>\w+)$',
        views.display_question,
        name='display_question'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/admin/(?P<quiz_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/admin/$',
        views.quiz_admin,
        name='quiz_admin'
     ),
-    url(r'^quiz/(?P<course_pk>\d+)/admin/(?P<quiz_pk>\d+)/edit_question/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/edit_question/$',
        views.edit_quiz_question,
        name='edit_quiz_question'
     ),
-    url(r'^quiz/(?P<quizpk>\d+)/admin/edit_question/(?P<mq_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/edit_question/(?P<mq_pk>\d+)/$',
        views.edit_quiz_question,
        name='edit_quiz_question'
     ),
-    url(r'^quiz/admin/(?P<mq_pk>\d+)/edit_choices/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/edit_question/(?P<mq_pk>\d+)/edit_choices/$',
        views.edit_choices,
        name='edit_choices'
     ),
-    url(r'^quiz/test/(?P<mq_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/edit_question/(?P<mq_pk>\d+)/test$',
        views.test_quiz_question,
        name='test_quiz_question'
     ),
-    url(r'^quiz/details/(?P<sqr_pk>\d+)/$',
+    url(r'^course/(?P<course_pk>\d+)/quiz/(?P<quiz_pk>\d+)/details/(?P<sqr_pk>\d+)/$',
        views.quiz_details,
        name='quiz_details'
     ),

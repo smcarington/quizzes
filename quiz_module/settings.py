@@ -10,7 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/1.9/ref/settings/
 """
 
-import os
+import os,socket,math,random
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_tables2',
     'guardian',
     'quizzes',
 ]
@@ -92,7 +93,6 @@ DATABASES = {
         'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/1.9/ref/settings/#auth-password-validators
@@ -156,6 +156,27 @@ CHANNEL_LAYERS = {
     },
 }
 
+
+UNIVERSAL_CONSTANTS =  {"pi": math.pi, "e": math.e}
+PREDEFINED_FUNCTIONS = {"sin": lambda x: math.sin(x),
+                        "cos": lambda x: math.cos(x),
+                        "tan": lambda x: math.tan(x),
+                        "ln": lambda x: math.log(x, math.e),
+                        "rand": lambda x,y: random.randint(x,y),
+                        "Rand": lambda x,y: NZRandInt(x,y),
+                        "uni": lambda x,y,z: round(random.uniform(x,y),z),
+                        "gobble": lambda *args: 1,
+                        }
+
+def NZRandInt(x,y):
+    """ Generates a random non-zero number between x and y """
+    if x>0: # Behave like normal if x>0
+        return random.randint(x,y)
+    else:
+        if random.randint(0,1):
+            return random.randint(x,-1)
+        else:
+            return random.randint(1,y)
 # Get local settings
 try:
     from .local_settings import *

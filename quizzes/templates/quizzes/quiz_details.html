@@ -1,8 +1,9 @@
-{% extends 'Problems/base.html' %}
+{% extends 'quizzes/base.html' %}
 
 {% comment %}
     Has context "return_html" which is a string containing the problems/answers
     Has context "sqr" which is StudentQuizResult
+    Has context "course_pk" with the primary key for the course
 {% endcomment %}
 
 {% block title %}
@@ -11,8 +12,8 @@
 
 {% block content %}
 
-    <h1>{{sqr.quiz.name}}</h1>
-    <a href="{% url 'quizzes' %}">&#171; Return to Quizzes</a>
+    <a href="{% url 'list_quizzes' course_pk=course_pk%}">&#171; Return to Quizzes</a>
+    <h2>{{sqr.quiz.name}}</h2>
     
     {{return_html | safe}}
 {% endblock %}

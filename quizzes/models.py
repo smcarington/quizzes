@@ -1,10 +1,15 @@
 from django.db import models
+from django.db.models import Max
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect
 
 # Row based permissions
 from guardian.models import UserObjectPermission
+
+import re
+import json
+import random
 
 class Course(models.Model):
     """ A container for storing multiple quizzes. Will only be visible to students
@@ -83,6 +88,7 @@ class Quiz(models.Model):
         expires - (DateTimeField) The date on which the quiz closes. 
         out_of - (IntegerField) The number of different MarkedQuestion pools. 
     """
+    course  = models.ForeignKey(Course, related_name='quizzes')
     name    = models.CharField("Name", max_length=200)
     # Number of tries a student is allowed. A value of category=0 is equivalent to infinity.
     tries   = models.IntegerField("Tries", default=0)

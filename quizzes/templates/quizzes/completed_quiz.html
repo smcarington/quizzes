@@ -1,9 +1,10 @@
-{% extends 'Problems/base.html' %}
+{% extends 'quizzes/base.html' %}
 {% load navbar_inclusion_tag %}
 {% load render_table from django_tables2 %}
 
 {% comment %}
     Has context {{result_table}} which is a QuizResultTable element
+    Has context {{sqr}} which is the StudentQuizResult element
 {% endcomment %}
 
 {% block title %}
@@ -12,8 +13,8 @@
 
 {% block content %}
     <div class="poll-title">
+        <a class="font12" href="{% url 'list_quizzes' course_pk=sqr.quiz.course.pk%}">&#171; Return to Quizzes</a>
         <h1>{{sqr.quiz.name}} Complete!</h1>
-        <a class="font12" href="{% url 'list_quizzes' %}">&#171; Return to Quizzes</a>
     </div>
 
     <div class="quiz_end">

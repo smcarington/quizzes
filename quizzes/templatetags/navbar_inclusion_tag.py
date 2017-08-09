@@ -63,3 +63,50 @@ def get_range(value):
     return range(value)
 
 
+@register.simple_tag
+def mathify_choice(choice):
+    """ Takes a choice list from a MarkedQuestion element and outputs the math friendly html. Currently only
+        supports integers.
+        Input: choice (list of strings) -
+        Output: KaTeX renderable HTML.
+    """
+    mathstring = '\(\{'
+    for element in choice.replace(' ', '').split(';'):
+        if is_integer(element):
+            mathstring += element + ','
+        else:
+            try:
+                match1 = re.match(r'[rR]and\((-?\d+),(-?\d+)\)',element)
+                match2 = re.match(r'uni\((-?\d*\.?\d+),(-?\d*\.?\d+),(\d+)\)',element)
+
+                if match1:
+                    field = '\mathbb Z'
+                    lower,upper = match1.groups(0)
+                    acc = ''
+                elif match2:
+                    field = '\mathbb R'
+                    lower,upper,acc = match2.groups(0)
+                else:
+                    field = 'Un'
+                    lower = ''
+                    upper = ''
+                    acc   = ''
+
+            #    lower,upper = element[1:].split(',')
+            #    integer = '\mathbb Z'
+
+            #    if element[0].istitle():
+            #        integer +='^*'
+
+                mathstring += ' {field}_{{ {acc} }}({low},{upp}), '.format(field=field, low=lower, upp=upper, acc=acc)
+
+            except ValueError as error:
+                print(error)
+                return ''
+
+    # Remove the final unnecessary ','
+    mathstring = mathstring[0:-1]
+    mathstring += '\}\)'
+
+    return format_html('<label class="mathrender">{}</label>', mathstring)
+

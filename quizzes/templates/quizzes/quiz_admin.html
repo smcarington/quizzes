@@ -1,4 +1,4 @@
-{% extends 'Problems/base.html' %}
+{% extends 'quizzes/base.html' %}
 {% load render_table from django_tables2 %}
 
 {% comment %}
@@ -11,8 +11,8 @@
 {% endblock %}
 
 {% block content %}
+    <a href="{% url 'list_quizzes' course_pk=quiz.course.pk %}">&#171; Return to Quizzes</a>
     <h1>{{quiz.name}} Administration</h1>
-        <a href="{% url 'quizzes' %}">&#171; Return to Quizzes</a>
    
     <div class="quiz-divs">
     {% if questions %}
@@ -31,7 +31,7 @@
         <ul>
             <li> Instructions
         </ul>
-        <a class="btn btn-default" href="{% url 'edit_quiz_question' quizpk=quiz.pk %}">Add Question</a>
-        <a class="btn btn-default" href="{% url 'edit_quiz' quizpk=quiz.pk %}">Edit Quiz Properties</a>
+        <a class="btn btn-default" href="{% url 'edit_quiz_question' course_pk=quiz.course.pk quiz_pk=quiz.pk %}">Add Question</a>
+        <a class="btn btn-default" href="{% url 'edit_quiz' course_pk=quiz.course.pk quiz_pk=quiz.pk %}">Edit Quiz Properties</a>
     </div>
 {% endblock %}

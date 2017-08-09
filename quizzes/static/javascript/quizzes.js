@@ -36,4 +36,14 @@ $(document).ready(function() {
     $('.mathrender').each( function () {
         renderMathInElement( $(this)[0] );
     });
+
+    // Adds datetimepickers
+
+    jQuery('#id_expires').datetimepicker(
+            { format:'Y-m-d H:i',
+            });
+    jQuery('#id_live').datetimepicker(
+            { format:'Y-m-d H:i',
+            });
+    
 });

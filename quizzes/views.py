@@ -11,9 +11,13 @@ from django.db.models import Max, Q, F
 
 from .models import *
 from .forms import *
+from .tables import *
 from guardian.shortcuts import get_objects_for_user
+from simpleeval import simple_eval, NameNotDefined
+import random
 import json
 import csv
+import re
 
 def staff_required(login_url=settings.LOGIN_URL):
     return user_passes_test(lambda u:u.is_staff, login_url=login_url)
@@ -27,24 +31,39 @@ def delete_item(request, objectStr, pk):
     """
     if request.user.is_staff:
         # Depending on which item is set, we return different pages
-        if objectStr == "pollquestion":
-            theObj      = get_object_or_404(PollQuestion, pk = pk)
-            poll_pk = theObj.poll.pk
-            course_pk = theObj.poll.course.pk
-            return_View = redirect(reverse(
-                    'poll_admin',  
-                    kwargs={
-                        'course_pk': course_pk,
-                        'poll_pk': poll_pk,
-                    }))
+        if objectStr == "markedquestion":
+            theObj = get_object_or_404(
+                MarkedQuestion.objects.select_related('quiz', 'quiz__course'),
+                pk = pk)
+            description = "MarkedQuestion {}".format(theObj.pk)
+            # Get the course for the object so we can check if the user has permissions
+            # to delete the object
+            course = theObj.quiz.course
+            if request.user.has_perm('quizzes.can_edit_quiz', course):
+                return_view = redirect(reverse(
+                        'quiz_admin',  
+                        kwargs={
+                            'course_pk': course.pk,
+                            'quiz_pk': theObj.quiz.pk,
+                        }))
+            else:
+                raise HttpResponseForbidden(
+                    'You are not authorized to delete that object')
+                
         else:
             return HttpResponse('<h1>Invalid Object Type</h1>')
 
         if request.method == "POST":
             theObj.delete()
-            return return_View
+            return return_view
         else:
-            return render(request, 'quizzes/delete_item.html', {'object': theObj, 'type' : objectStr})
+            return render(request, 'quizzes/delete_item.html', 
+                    {'object': theObj, 
+                     'type' : objectStr,
+                     'description': description,
+                     'return_url': return_view.url,
+                    }
+                )
     else:
         return HttpResponseForbidden()
 
@@ -86,6 +105,10 @@ def new_quiz(request, course_pk):
         TODO: Check against 'can_edit_quiz" privileges.
     """
     course = get_object_or_404(Course, pk=course_pk)
+
+    if not request.user.has_perm('quizzes.can_edit_quiz', course):
+        raise HttpResponse('You are not authorized to create quizzes')
+
     if request.method == "POST":
         form = QuizForm(request.POST)
         if form.is_valid():
@@ -93,14 +116,14 @@ def new_quiz(request, course_pk):
             quiz.course = course
             quiz.update_out_of()
             # Create an exemption type for the quiz and update it's out_of field
-            exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
-            exemption.quiz_update_out_of(quiz)
+            # exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
+            # exemption.quiz_update_out_of(quiz)
             
             # For database convenience, populate the category as well. Updates will be made
             # in the function 'display_question', which will also take care of any student whose
             # record was not made to begin with
-            ret_flag = populate_category_helper(exemption)
-            return redirect(administrative)
+            #ret_flag = populate_category_helper(exemption)
+            return redirect('list_quizzes', course_pk=course.pk)
     else:
         form = QuizForm()
 
@@ -131,12 +154,12 @@ def edit_quiz(request, course_pk, quiz_pk):
             # exemption score
             exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
             exemption.quiz_update_out_of(quiz)
-            return redirect('quiz_admin', quiz_pk=quiz.pk)
+            return redirect('quiz_admin', course_pk=course_pk, quiz_pk=quiz.pk)
     else:
         form = QuizForm(instance=quiz)
         return render(
             request, 
-            'quizzes/edit_announcement.html', 
+            'quizzes/generic_form.html', 
             { 'form' : form,
               'header': 'Edit Quiz',
               'course': quiz.course,
@@ -163,7 +186,10 @@ def list_quizzes(request, course_pk, message=''):
     live_quiz   = all_quizzes.filter(live__lte=timezone.now(), expires__gt=timezone.now())
 
     # Get this specific user's previous quiz results
-    student_quizzes = SQRTable(StudentQuizResult.objects.filter(student=request.user).order_by('quiz'))
+    student_quizzes = SQRTable(
+        StudentQuizResult.objects.select_related(
+            'quiz', 'quiz__course').filter(student=request.user).order_by('quiz')
+    )
     RequestConfig(request, paginate={'per_page': 10}).configure(student_quizzes)
 
     return render(request, 'quizzes/list_quizzes.html', 
@@ -172,6 +198,7 @@ def list_quizzes(request, course_pk, message=''):
              'student_quizzes': student_quizzes,
              'all_quizzes_table': all_quizzes_table,
              'message': message,
+             'course': course,
             });
 
 @staff_required()
@@ -209,9 +236,9 @@ def edit_quiz_question(request, course_pk, quiz_pk, mq_pk=None):
                 mquestion = form.save(commit=False)
                 mquestion.update(quiz)
                 # Also update the exemption score, if necessary
-                exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
-                exemption.quiz_update_out_of(mquestion.quiz)
-                return redirect('edit_choices', mq_pk=mquestion.pk)
+                # exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
+                # exemption.quiz_update_out_of(mquestion.quiz)
+                return redirect('edit_choices', course_pk=course_pk, quiz_pk=quiz_pk, mq_pk=mquestion.pk)
         else:
             form = MarkedQuestionForm()
     else: # Editing a question, so populate with current question
@@ -223,11 +250,11 @@ def edit_quiz_question(request, course_pk, quiz_pk, mq_pk=None):
                 mquestion.update(quiz)
                 mquestion.quiz.update_out_of()
                 # Also update the exemption score, if necessary
-                exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
-                exemption.quiz_update_out_of(mquestion.quiz)
+                #exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
+                #exemption.quiz_update_out_of(mquestion.quiz)
 
                 # Check to see if there are any possible issues with the format of the question
-                return redirect('quiz_admin', quizpk=quiz.pk)
+                return redirect('quiz_admin', course_pk=course_pk, quiz_pk=quiz.pk)
         else:
             form = MarkedQuestionForm(instance=mquestion)
 
@@ -243,9 +270,10 @@ def edit_quiz_question(request, course_pk, quiz_pk, mq_pk=None):
         <li> Use 'rand(-5,10)' to create a random integer in the range [-5,10] (inclusive). Use 'uni(-1,1,2)' to create a real number in [-1,1] with 2 floating points of accuracy
     </ul>"""
 
-    return render(request, 'quizzes/edit_announcement.html', 
+    return render(request, 'quizzes/generic_form.html', 
         { 'form': form,
-          'sidenote': sidenote
+          'sidenote': sidenote,
+          'header': "Create Quiz Question",
         }
     )
 
@@ -314,19 +342,27 @@ def isnumber(string):
     except:
         return False
 
-def edit_choices(request, mq_pk):
-    """ View which handles the ability to add/edit choices.
+def edit_choices(request, course_pk, quiz_pk, mq_pk):
+    """ After adding/editing a MarkedQuestion object, we need to specify the
+        choices, which indicates what types of values can be substituted into
+        the variables {v[i]}. 
+        View which handles the ability to add/edit choices.
         <<Input>>
+        course_pk, quiz_pk (Integers) Not really needed, but for consistent urls
         mq_pk (integer) the marked question primary key
     """
 
-    mquestion = get_object_or_404(MarkedQuestion, pk=mq_pk)
+    mquestion = get_object_or_404(
+        MarkedQuestion.objects.select_related('quiz','quiz__course'), 
+        pk=mq_pk
+    )
     error_message = ''
 
     if request.method == "POST":
         form_data = request.POST
         try:
             updated_choices = ''
+            # On post, we go through all the current choices and update them
             for field, data in form_data.items():
                 if 'choice' in field:
                     cur_choice = form_data[field]
@@ -370,10 +406,10 @@ def edit_choices(request, mq_pk):
 # ---------- Quiz Handler (fold) ---------- #
 
 @login_required
-def start_quiz(request, quizpk):
+def start_quiz(request, course_pk, quiz_pk):
     """ View to handle when a student begins a quiz. 
         <<Input>>
-        quizpk (integer) - corresponding to the primary key of the quiz
+        quiz_pk (integer) - corresponding to the primary key of the quiz
         <<Output>>
         HttpResponse object. Renders quizzes/start_quiz.html or redirects 
                                      to display_question
@@ -381,7 +417,11 @@ def start_quiz(request, quizpk):
         Depends on: generate_next_question
     """
 
-    this_quiz = get_object_or_404(Quiz, pk=quizpk, live__lte=timezone.now(), expires__gt=timezone.now())
+    this_quiz = get_object_or_404(
+            Quiz, 
+            pk=quiz_pk, 
+            live__lte=timezone.now(), 
+            expires__gt=timezone.now())
     
     # Get the StudentQuizResults corresponding to this student. If there are
     # none, this is the first try. If there are some, we need to find the most
@@ -390,7 +430,9 @@ def start_quiz(request, quizpk):
     # attempt needs to be created. In the latter, we also need to check that the
     # student has not surpassed the number of attempts permitted
     student = request.user
-    quiz_results = StudentQuizResult.objects.filter(student=student, quiz=this_quiz)
+    quiz_results = StudentQuizResult.objects.filter(
+            student=student, quiz=this_quiz).select_related(
+                'quiz', 'quiz__course')
     high_score = -1
    
     # The user may be allowed several attempts. We need to determine what attempt the 
@@ -433,7 +475,7 @@ def start_quiz(request, quizpk):
                 is_new = True
             else: # No more tries allowed
                 message = "Maximum number of attempts reached for {quiz_name}.".format(quiz_name=this_quiz.name)
-                return list_quizzes(request, message) # Returns a view
+                return list_quizzes(request, course_pk=course_pk, message=message) # Returns a view
 
     # Need to genererate the first question
     return render(request, 'quizzes/start_quiz.html', 
@@ -740,7 +782,7 @@ def get_answer(question, choices):
         raise e
 
 @login_required
-def display_question(request, sqr_pk, submit=None):
+def display_question(request, course_pk, quiz_pk, sqr_pk, submit=None):
     """ When a student accesses a quiz, there is a redirect to this view which
         shows the current question quiz-question. This view also handles the
         submission of an answer, checking the correct answer and generating
@@ -755,7 +797,7 @@ def display_question(request, sqr_pk, submit=None):
 
         Depends: sub_into_question_string, mark_question, generate_next_question
     """
-    sqr = StudentQuizResult.objects.select_related('quiz').get(pk=sqr_pk)
+    sqr = StudentQuizResult.objects.select_related('quiz','quiz__course').get(pk=sqr_pk)
     string_answer = ''
     error_message = ''
     mc_choices = None
@@ -851,7 +893,6 @@ def display_question(request, sqr_pk, submit=None):
     return render(request, 'quizzes/display_question.html', 
         { 'sqr': sqr,
           'question': q_string, 
-          'sqrpk': sqrpk,
           'error_message': error_message,
           'string_answer': string_answer,
           'mc_choices': mc_choices,
@@ -878,15 +919,22 @@ def get_result_table(result):
     return QuizResultTable(ret_data)
 
 @staff_required()
-def test_quiz_question(request, mq_pk):
+def test_quiz_question(request, course_pk, quiz_pk, mq_pk):
     """ Generates many examples of the given question for testing purpose.
         Input: mpk (Integer) MarkedQuestion primary key
 
         Depends on: sub_into_question_string, render_html_for_question
     """
-    mquestion = get_object_or_404(MarkedQuestion, pk=mq_pk)
+    mquestion = get_object_or_404(
+            MarkedQuestion.objects.select_related('quiz', 'quiz__course'), 
+            pk=mq_pk)
 
-    if request.method == "POST":
+    if not request.user.has_perm('quizzes.can_edit_quiz', 
+            mquestion.quiz.course):
+        raise HttpResponseForbidden('You are not authorized to test this.')
+        
+
+    if request.method == "POST": # Testing the question
         num_tests = request.POST['num_tests']
         html = ''
 
@@ -903,6 +951,11 @@ def test_quiz_question(request, mq_pk):
                 problem = sub_into_question_string(mquestion, choice)
                 
                 html += render_html_for_question(problem, answer, choice, mc_choices)
+                # Should add better error handling here.
+        except KeyError as e:
+            html = ("Key Error: Likely an instance of single braces '{{,'}} when"
+            " double braces should have been used. See the code<br>"
+            " '{{ {} }}'").format(str(e))
         except Exception as e:
             html = e
 
@@ -941,14 +994,14 @@ def render_html_for_question(problem, answer, choice, mc_choices):
     return template
 
 @login_required
-def quiz_details(request, sqrpk):
+def quiz_details(request, course_pk, quiz_pk, sqr_pk):
     """ A view which allows students to see the details of a
         completed/in-progress quiz.  
 
     Depends on: sub_into_question_string
     """
 
-    quiz_results = get_object_or_404(StudentQuizResult, pk=sqrpk)
+    quiz_results = get_object_or_404(StudentQuizResult, pk=sqr_pk)
 
     if request.user != quiz_results.student:
         raise HttpResponseForbidden()
@@ -995,6 +1048,7 @@ def quiz_details(request, sqrpk):
     return render(request, 'quizzes/quiz_details.html',
             {'return_html': return_html,
              'sqr': quiz_results,
+             'course_pk': course_pk,
             })
             
 # ---------- Quiz Handler (end) ---------- #
@@ -1050,7 +1104,7 @@ def create_course(request):
 def add_staff_member(request):
     """ Add staff members to a course """
     # Populate the form with list of courses 
-    courses = get_objects_for_user(request.user, 'quizzes.can_edit_poll')
+    courses = get_objects_for_user(request.user, 'quizzes.can_edit_quiz')
     if request.method == "POST":
         form = StaffForm(request.POST)
         course_pk = int(request.POST['course'])
@@ -1081,7 +1135,7 @@ def add_staff_member(request):
 
 def add_students(request):
     # Populate the form with list of courses 
-    courses = get_objects_for_user(request.user, 'quizzes.can_edit_poll')
+    courses = get_objects_for_user(request.user, 'quizzes.can_edit_quiz')
     sidenote = ("Upload a csv file whose rows are the UTORid's of the "
         "students you wish to add to this course")
     if request.method == "POST":
