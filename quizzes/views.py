@@ -152,8 +152,8 @@ def edit_quiz(request, course_pk, quiz_pk):
             quiz.update_out_of()
             # Since we might have changed the quiz's score, we also need to fix the
             # exemption score
-            exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
-            exemption.quiz_update_out_of(quiz)
+            #exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
+            #exemption.quiz_update_out_of(quiz)
             return redirect('quiz_admin', course_pk=course_pk, quiz_pk=quiz.pk)
     else:
         form = QuizForm(instance=quiz)
@@ -401,6 +401,65 @@ def edit_choices(request, course_pk, quiz_pk, mq_pk):
                 "error_message": error_message,
             })
 
+@staff_required()
+def search_students(request, course_pk):
+    """ AJAX view for searching for a student's records.
+    """
+    try:
+        course = get_object_or_404(Course, pk=course_pk)
+        if not request.user.has_perm('can_edit_polls', course):
+            raise HttpResponseForbidden('Insufficient privileges')
+
+        if 'query' in request.GET:
+            query = request.GET['query']
+
+            fields = ["username__contains", "first_name__contains", "last_name__contains",]
+            queries = [Q(**{f:query}) for f in fields]
+            qs = Q()
+            for query in queries:
+                qs = qs | query
+
+            # Filter by course as well
+            users = User.objects.filter(qs).prefetch_related(
+                    'membership','membership__courses').distinct()
+            ret_list = []
+            for user in users:
+                try:
+                    if course in user.membership.courses.all():
+                        ret_list.append(user)
+                except Exception as e:
+                    continue #membership might not exist
+
+            return render(request, 'quizzes/search_students.html',
+                { 'users': ret_list,
+                  'course_pk': course_pk,
+                }
+            )
+
+    except Exception as e:
+        print(str(e))
+        raise Http404('Invalid request type')
+
+@staff_required()
+def student_results(request, course_pk, user_pk):
+    course = get_object_or_404(Course, pk=course_pk)
+
+    if not request.user.has_perm('can_edit_quiz', course):
+        raise HttpResponseForbidden('Insufficient Privilges')
+    student = get_object_or_404(User, pk=user_pk)
+    # Get this specific user's previous quiz results
+    student_quizzes = SQRTable(
+        StudentQuizResult.objects.select_related(
+            'quiz', 'quiz__course').filter(student=student).order_by('quiz')
+    )
+    RequestConfig(request, paginate={'per_page': 10}).configure(student_quizzes)
+
+    return render(request, 'quizzes/student_results.html', 
+            { 'student_quizzes': student_quizzes,
+              'course': course,
+              'student': student,
+            });
+
 # ---------- Quiz Add/Edit/Admin (end) ---------- #
 
 # ---------- Quiz Handler (fold) ---------- #
@@ -440,15 +499,9 @@ def start_quiz(request, course_pk, quiz_pk):
     is_new = False;
     if len(quiz_results) == 0: # First attempt
         # Should be made into an SQR manager method
-        cur_quiz_res = StudentQuizResult(
-                student=student, 
-                quiz=this_quiz, 
-                attempt=1, 
-                score=0, 
-                result='{}',
-                cur_quest = 1
-                )
-        cur_quiz_res.save()
+        #cur_quiz_res = StudentQuizResult( student=student, quiz=this_quiz, attempt=1, score=0, result='{}',cur_quest = 1)
+        #cur_quiz_res.save()
+        cur_quiz_res = StudentQuizResult.create_new_record(student,this_quiz)
         generate_next_question(cur_quiz_res)
         is_new = True
     else: 
@@ -463,14 +516,10 @@ def start_quiz(request, course_pk, quiz_pk):
         if (cur_quiz_res.cur_quest == 0): # Current attempt is over.
             if (most_recent_attempt < this_quiz.tries or this_quiz.tries == 0): # Allowed more tries
                 # Should be made into an SQR manager method
-                cur_quiz_res = StudentQuizResult(
-                    student=student, 
-                    quiz=this_quiz, 
-                    attempt=most_recent_attempt+1,
-                    score=0,
-                    result='{}',
-                    cur_quest=1)
-                cur_quiz_res.save()
+                #cur_quiz_res = StudentQuizResult(student=student, quiz=this_quiz, attempt=most_recent_attempt+1,score=0,result='{}',cur_quest=1)
+                #cur_quiz_res.save()
+                cur_quiz_res = StudentQuizResult.create_new_record(
+                    student, this_quiz, most_recent_attempt+1)
                 generate_next_question(cur_quiz_res) #Should make this a model method
                 is_new = True
             else: # No more tries allowed
@@ -624,7 +673,7 @@ def generate_next_question(sqr):
     # element from quiz.category = sqr.cur_quest, and from that question we then
     # choose a random choice, possibly randomizing yet a third time of the
     # choices are also random
-    question = sqr.quiz.get_random_question(sqr.cur_quest)
+    question = sqr.quiz.get_random_question(sqr.q_order[sqr.cur_quest-1])
 
     # From this question, we now choose a random input choice
     a_choice = question.get_random_choice()
@@ -1001,9 +1050,13 @@ def quiz_details(request, course_pk, quiz_pk, sqr_pk):
     Depends on: sub_into_question_string
     """
 
+    course = get_object_or_404(Course, pk=course_pk)
     quiz_results = get_object_or_404(StudentQuizResult, pk=sqr_pk)
 
-    if request.user != quiz_results.student:
+    if not ( (request.user == quiz_results.student) 
+                or
+             (request.user.has_perm('can_edit_quiz', course))
+           ):
         raise HttpResponseForbidden()
 
     result_dict = quiz_results.get_result()[0]
@@ -1048,7 +1101,7 @@ def quiz_details(request, course_pk, quiz_pk, sqr_pk):
     return render(request, 'quizzes/quiz_details.html',
             {'return_html': return_html,
              'sqr': quiz_results,
-             'course_pk': course_pk,
+             'course': course,
             })
             
 # ---------- Quiz Handler (end) ---------- #
@@ -1221,3 +1274,4 @@ def enroll_course(request):
     return HttpResponse(json.dumps(response_data))
 
 # --------- Course Administration (end) ------- #
+

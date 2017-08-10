@@ -61,10 +61,18 @@ class MarkedQuestionTable(Table):
             )
 
 class AllQuizTable(Table):
+    out_of = Column("Points", empty_values=())
+
     class Meta:
         model = Quiz
         attrs = {'class': 'paleblue'}
-        exclude = ['course','id']
+        exclude = ['course','id', '_cat_list']
+
+    def render_out_of(self, value, record):
+        return record.out_of
+
+    def render_cat_list(self, value, record):
+        return len(cat_list)
 
     def render_tries(self, value, record):
         # Returns the value or infinity if value is 0

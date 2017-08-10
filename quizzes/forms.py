@@ -2,6 +2,7 @@ from django import forms
 from django.forms import IntegerField
 from django.db.models import F
 from django.contrib.admin import widgets
+from django.core.exceptions import ValidationError
 
 from .models import *
 
@@ -58,6 +59,24 @@ class MarkedQuestionForm(forms.ModelForm):
 #    category = IntegerField(min_value=1, initial=1)
 #
 #    problem_str = forms.CharField(widget=forms.Textarea(text_area_attrs))
+
+    def clean_problem_str(self):
+        """ Validate that the index variables occur in the correct order """
+        problem_str = self.cleaned_data['problem_str']
+        list_of_vars = re.findall(r'{v\[(\d+)\]}', problem_str)
+        # Find the distinct indices, convert them to integers, and sort
+        list_of_vars = list(set(list_of_vars))
+        list_of_vars = [int(var_ind) for var_ind in list_of_vars]
+        list_of_vars = sorted(list_of_vars)
+        # Now we check whether they are sequential
+        if all(a==b for a,b in enumerate(list_of_vars, list_of_vars[0])):
+            return problem_str
+        else:
+            raise ValidationError(
+                "Variables have non-sequential indices {}".format(list_of_vars)
+            )
+
+
 
     class Meta:
         text_area_attrs = {'cols':'80', 'rows': '5'}

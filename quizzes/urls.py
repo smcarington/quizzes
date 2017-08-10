@@ -89,5 +89,14 @@ urlpatterns = [
        views.quiz_details,
        name='quiz_details'
     ),
+    url(r'^course/(?P<course_pk>\d+)/search_students/$',
+       views.search_students,
+       name='search_students'
+    ),
+    url(r'^course/(?P<course_pk>\d+)/search_results/(?P<user_pk>\d+)/$',
+       views.student_results,
+       name='student_results'
+    ),
+
     # Quizzes and Quiz Admin (end)
 ]

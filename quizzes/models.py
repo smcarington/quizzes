@@ -64,7 +64,7 @@ class UserMembership(models.Model):
     a UserMembership object according to user, then the um.courses.add(course)
     command.
     """
-    user = models.ForeignKey(User)
+    user = models.OneToOneField(User, related_name='membership')
     courses = models.ManyToManyField(Course)
 
     def __str__(self):
@@ -86,6 +86,8 @@ class Quiz(models.Model):
         live  - (DateTimeField) The date on which the quiz becomes available to
             students
         expires - (DateTimeField) The date on which the quiz closes. 
+        _cat_list - (TextField) Contains the category pool numbers. Has custom
+            set/get methods to serialize the data.
         out_of - (IntegerField) The number of different MarkedQuestion pools. 
     """
     course  = models.ForeignKey(Course, related_name='quizzes')
@@ -94,29 +96,68 @@ class Quiz(models.Model):
     tries   = models.IntegerField("Tries", default=0)
     live    = models.DateTimeField("Live on")
     expires = models.DateTimeField("Expires on")
-    out_of  = models.IntegerField("Points", default=1)
+    _cat_list = models.TextField(null=True)
+#    # Replaced as a property computed from _cat_list
+#    out_of  = models.IntegerField("Points", default=1)
 
     class Meta:
         verbose_name = "Quiz"
         verbose_name_plural = "Quizzes"
 
-    def update_out_of(self):
-        """ Determines the number of MarkedQuestion pools in this quiz. Is
-            called when MarkedQuestions are added/edited/deleted from the quiz
+    # cat_list needs custom set/get methods to handle serialization
+    @property
+    def cat_list(self):
+        return self._cat_list
+
+    @cat_list.setter
+    def cat_list(self, value):
+        """ Sets the _cat_list attribute. value should be a list of integers
+            indexing the category pools.
         """
-        # Important to base this on the max category, rather than number of questions
-        self.out_of = self.markedquestion_set.aggregate(Max('category'))['category__max']
-        if not self.out_of: # New quiz, so markedquestion_set is empty
-            self.out_of = 0
+        self._cat_list = json.dumps(value)
         self.save()
 
-    def get_random_question(self, category):
-        """ Returns a random question with foreign key (self) and the given category
-            Input: category (integer) - the MarkedQuestion pool to take from
-            Output: (MarkedQuestion) object
+    @cat_list.getter
+    def cat_list(self):
+        return json.loads(self._cat_list)
+
+    # The out_of field is now replaced by a property, equivalent to the number
+    # of distinct category numbers
+    @property
+    def out_of(self):
+        return len(self.cat_list)
+
+    def update_out_of(self):
+        """ Determines the number of MarkedQuestion pools in this quiz. Is
+            called when MarkedQuestions are added/edited/deleted from the quiz.
         """
-        
-        return random.choice(self.markedquestion_set.filter(category=category))
+        cats = list(self.markedquestion_set.all().values_list('category', flat=True))
+        # Make distinct
+        cats = list(set(cats))
+        self.cat_list = cats
+        # Old technique,  before allowing for random question order
+        # -- Important to base this on the max category, rather than number of questions
+        # -- self.out_of = self.markedquestion_set.aggregate(Max('category'))['category__max']
+        self.save()
+
+    def get_random_question(self, index):
+        """ Returns a random question from the category corresponding to
+            cat_list[index]
+            <<INPUT>>
+            index (integer) - a non-negative integer no more than self.out_of.
+                The quiz has an array enumerating the categories, and we pull a
+                question from the category corresponding to index. For example,
+                if cat_list = [1, 3, 4, 10] and index = 3, we choose a question
+                from category=cat_list[index] = cat_list[3] = 10.
+            <<OUTPUT>>
+            (MarkedQuestion) The question.
+        """
+        # Get the category list and select the Marked Questions corresponding to
+        # this category
+        cat_list = self.cat_list
+        marked_questions = self.markedquestion_set.filter(
+                category=cat_list[index])
+        return random.choice(marked_questions)
 
     def __str__(self):
         return self.name
@@ -146,14 +187,14 @@ class MarkedQuestion(models.Model):
            multiple choice answers. These can include variables {v[i]} as well,
            and are delimited by a semi-colon.
     """
-    quiz        = models.ForeignKey("Quiz", Quiz, null=True)
+    quiz         = models.ForeignKey("Quiz", Quiz, null=True)
     # Keeps track of the global category, so that multiple questions can be used
-    category    = models.IntegerField("Category", default=1)
+    category     = models.IntegerField("Category", default=1)
     problem_str = models.TextField("Problem")
-    choices     = models.TextField("Choices", null=True)
-    num_vars    = models.IntegerField(null=True)
-    answer      = models.TextField("Answer")
-    functions   = models.TextField("Functions", default='{}')
+    choices      = models.TextField("Choices", null=True)
+    num_vars     = models.IntegerField(null=True)
+    answer       = models.TextField("Answer")
+    functions    = models.TextField("Functions", default='{}')
     # Allows for multiple kinds of questions
     QUESTION_CHOICES = ( 
             ('D', 'Direct Entry'),
@@ -172,13 +213,39 @@ class MarkedQuestion(models.Model):
         ordering = ['quiz', 'category']
         verbose_name = "Marked Question"
 
+    def save(self, *args, **kwargs):
+        """ Override save so that set_num_vars is called automatically"""
+        self.set_num_vars()
+        super(MarkedQuestion, self).save(*args, **kwargs)
+
+    # Whenever we set the problem_str, this function is called to update the
+    # number of variables. It also validates that they are sequentially indexed
+    def set_num_vars(self):
+        """ Go through problem_str and check the variables {v[i]}. Ensure the
+            'i' occur in sequential order, and throw an error otherwise
+        """
+        # Use a regex to find all instances of {v[i]}, but only capture the
+        # variable indices. 
+        list_of_vars = re.findall(r'{v\[(\d+)\]}', self.problem_str)
+        # Find the distinct indices, convert them to integers, and sort
+        list_of_vars = list(set(list_of_vars))
+        list_of_vars = [int(var_ind) for var_ind in list_of_vars]
+        list_of_vars = sorted(list_of_vars)
+        # Now we check whether they are sequential
+        if all(a==b for a,b in enumerate(list_of_vars, list_of_vars[0])):
+            self.num_vars = len(list_of_vars)
+        else:
+            self.num_vars = None
+            raise NonSequentialVariables(
+                "Variables have non-sequential indices {}".format(list_of_vars)
+            )
+
     def update(self, quiz):
         """ Updates the quiz to which this belongs, and updates that quiz's
             attributes as well. Called when adding/editing/deleting a
             MarkedQuestion.
         """
         self.quiz = quiz
-        self.num_vars = len(re.findall(r'{v\[\d+\]}', self.problem_str))
         self.save()
         quiz.update_out_of()
 
@@ -188,7 +255,6 @@ class MarkedQuestion(models.Model):
 
     def __str__(self):
         return self.problem_str
-
 
 class StudentQuizResult(models.Model):
     """ When a student starts/writes a quiz, it creates a StudentQuizResult
@@ -205,7 +271,16 @@ class StudentQuizResult(models.Model):
             allowing the student to leave during a quiz and resume again later.
         result - (TextField) String serialized as a JSON object. 
         score - (IntegerField) The score the student achieved in this question.
-    
+        _q_order - (Private: JSON serialized list) A randomization of the array
+            [0,1,2,...,quiz.out_of-1] indicating the order of indices to pull 
+            from quiz.cat_list. Allows for non-sequential ordering of
+            categories. For example, if 
+                quiz.cat_list = [1, 3, 4, 10*]
+                quiz.out_of   = 4
+                _q_order      = [1, 0, 3, 2*]
+            then question cur_quest = 4 corresponds to
+            pool = cat_list[_q_order[cur_quest-1]] = cat_list[_q_order[3]] 
+                 = cat_list[2] = 10.
     """
     student   = models.ForeignKey(User)
     quiz      = models.ForeignKey(Quiz)
@@ -239,9 +314,20 @@ class StudentQuizResult(models.Model):
     #          this question were v=[1,2,3], and the student got the question wrong with a guess of 15.7
     result  = models.TextField(default='{}')
     score   = models.IntegerField(null=True)
+    _q_order = models.TextField(default='')
 
     class Meta:
         verbose_name = "Quiz Result"
+
+    @property
+    def q_order(self):
+        return json.loads(self._q_order)
+
+    @q_order.setter
+    def q_order(self, value):
+        """ Value should be a list of integers """
+        self._q_order = json.dumps(value)
+        self.save()
 
     def update_score(self):
         """ Adds one to the overall score """
@@ -285,6 +371,28 @@ class StudentQuizResult(models.Model):
         
         return is_last
 
+    @classmethod
+    def create_new_record(cls, student, quiz, attempt=1):
+        """ Creates a new StudentQuizResult record, instantiating a lot of
+            redundant information.
+            <<INPUT>>
+            student (User) 
+            quiz (Quiz)
+            attempt (Integer default 1) The attempt number
+        """
+        # Create _q_order by randomizing the sequence [0,1,2,...,quiz.out_of-1]
+        order = [x for x in range(0,quiz.out_of)]
+        random.shuffle(order)
+        order = json.dumps(order)
+        new_record = cls(
+            student=student, quiz=quiz, attempt=attempt,
+            score=0, result='{}', cur_quest=1,
+            _q_order = order
+        )
+        new_record.save()
+        return new_record
+
+ 
     def __str__(self):
         return self.student.username + " - " + self.quiz.name + " - Attempt: " + str(self.attempt)
 
@@ -296,3 +404,10 @@ class CSVFile(models.Model):
 
     def __str__(self):
         return self.doc_file
+
+#Exception for MarkedQuestion validation of num_vars
+class NonSequentialVariables(Exception):
+    pass
+
+
+
