@@ -18,12 +18,6 @@ class Course(models.Model):
     name = models.CharField(max_length=20)
     # Allows any student to enroll
     open_enrollment = models.BooleanField(default=False) 
-    # Determine whether a quiz is live or not.
-    status = models.BooleanField(blank=True, default=False)
-
-    def update_last_active(self):
-        self.last_active = timezone.now()
-        self.save()
 
     def add_admin(self, username):
         """ Adds row level adminstrative abilities for the specified user. Takes
@@ -48,8 +42,16 @@ class Course(models.Model):
         except Exception as e:
             print(e)
 
-    def get_status(self):
-        return self.status
+    @property
+    def status(self):
+        num_quizzes = self.quizzes.filter(
+                live__lte=timezone.now(),
+                expires__gt=timezone.now()).count()
+        if num_quizzes:
+            return "{} Active Quiz{}".format(
+                num_quizzes, '' if num_quizzes==1 else 'zes')
+        else:
+            return "No Active Quiz"
 
     def __str__(self):
         return self.name
@@ -404,6 +406,63 @@ class CSVFile(models.Model):
 
     def __str__(self):
         return self.doc_file
+
+
+# --------- Marks (fold) ------- #
+
+
+class Evaluation(models.Model):
+    """ Model used to track events to which students receive grades. 
+    """
+    name = models.CharField(max_length=200)
+    out_of = models.IntegerField(default=0)
+    course = models.ForeignKey(Course, null=True)
+
+    def quiz_update_out_of(self, quiz):
+        """ If the exemption corresponds to a quiz, we update the out_of category
+        """
+        self.out_of = quiz.out_of
+        self.save()
+
+    def __str__(self):
+        return self.name
+
+class StudentMark(models.Model):
+    """ Tracks a student's mark. 
+        <<INPUT>>
+        user (User) the student
+        evaluation (Evaluation) The evaluation object (quiz, test, etc)
+        score (Float) The score (relative to evaluation.out_of)
+    """
+    user = models.ForeignKey(User, related_name='marks')
+    evaluation = models.ForeignKey(Evaluation)
+    score = models.FloatField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['user__username', 'evaluation']
+
+    def set_score(self, score, method=''):
+        """ Method to set the score. Allows input of method which determines how to set the score.
+            Input: score (float) - the value to update
+                   method (String) - 'HIGH' only update the score if the input score is higher
+              Out: old_score (float)  - the old score, for logging purposes
+        """
+
+        old_score = self.score
+
+        if method == 'HIGH':
+            self.score = max(self.score or 0, score)
+        else:
+            self.score = score
+
+        self.save()
+
+        return old_score
+
+    def __str__(self):
+        return "{user}: {score} in {category}".format(user=self.user, category=self.evaluation.name, score=str(self.score)) 
+
+# --------- Marks (end) ------- #
 
 #Exception for MarkedQuestion validation of num_vars
 class NonSequentialVariables(Exception):

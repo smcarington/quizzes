@@ -130,3 +130,32 @@ class QuizResultTable(Table):
 
     def render_guess(self, value, record):
         return format_html('<span class="mathrender">{}</span>', value)
+
+
+class SeeAllMarksTable(Table):
+    username   = Column(verbose_name="UTORid")
+
+    class Meta:
+        attrs = {'class': 'paleblue'}
+        row_attrs = {'data-active': lambda record: record.user.is_active}
+
+def define_all_marks_table():
+    """ A helper function which extends the base SeeAllMarksTable for variable category types.
+        <<INPUT>>
+          categories (List of ExemptionType) Add these as columns to the table
+        <<OUTPUT>>
+          (SeeAllMarksTable, Table) object
+    """
+    
+    categories = Evaluation.objects.all().order_by('name')
+    attrs = dict( (cat.name.replace(' ', ''), Column(verbose_name=cat.name)) for cat in categories)
+    # Meta is not inherited, so need to explicitly define it
+    attrs['Meta'] = type('Meta', 
+        (), 
+        dict(attrs={"class":"paleblue", "orderable":"True"}, 
+            order_by=("last_name","first_name",)
+        )
+    )
+    dyntable = type('FullMarksTable', (SeeAllMarksTable,), attrs)
+
+    return dyntable

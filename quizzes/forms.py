@@ -49,7 +49,7 @@ class QuizForm(forms.ModelForm):
     """ Simple model form for creating/editing quizzes"""
     class Meta:
         model = Quiz
-        exclude = ['out_of']
+        exclude = ['out_of','_cat_list', 'course']
 
 
 class MarkedQuestionForm(forms.ModelForm):

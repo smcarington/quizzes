@@ -14,10 +14,12 @@ from .forms import *
 from .tables import *
 from guardian.shortcuts import get_objects_for_user
 from simpleeval import simple_eval, NameNotDefined
+from sendfile import sendfile
 import random
 import json
 import csv
 import re
+import os
 
 def staff_required(login_url=settings.LOGIN_URL):
     return user_passes_test(lambda u:u.is_staff, login_url=login_url)
@@ -116,8 +118,9 @@ def new_quiz(request, course_pk):
             quiz.course = course
             quiz.update_out_of()
             # Create an exemption type for the quiz and update it's out_of field
-            # exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
-            # exemption.quiz_update_out_of(quiz)
+            evaluation, created = Evaluation.objects.get_or_create(
+                    name=quiz.name, course=course)
+            evaluation.quiz_update_out_of(quiz)
             
             # For database convenience, populate the category as well. Updates will be made
             # in the function 'display_question', which will also take care of any student whose
@@ -152,8 +155,9 @@ def edit_quiz(request, course_pk, quiz_pk):
             quiz.update_out_of()
             # Since we might have changed the quiz's score, we also need to fix the
             # exemption score
-            #exemption, created = ExemptionType.objects.get_or_create(name=quiz.name)
-            #exemption.quiz_update_out_of(quiz)
+            evaluation, created = Evaluation.objects.get_or_create(
+                    name=quiz.name, course=course)
+            evaluation.quiz_update_out_of(quiz)
             return redirect('quiz_admin', course_pk=course_pk, quiz_pk=quiz.pk)
     else:
         form = QuizForm(instance=quiz)
@@ -236,8 +240,9 @@ def edit_quiz_question(request, course_pk, quiz_pk, mq_pk=None):
                 mquestion = form.save(commit=False)
                 mquestion.update(quiz)
                 # Also update the exemption score, if necessary
-                # exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
-                # exemption.quiz_update_out_of(mquestion.quiz)
+                evaluation, created = Evaluation.objects.get_or_create(
+                        name=mquestion.quiz.name, course=mquestion.quiz.course)
+                evaluation.quiz_update_out_of(mquestion.quiz)
                 return redirect('edit_choices', course_pk=course_pk, quiz_pk=quiz_pk, mq_pk=mquestion.pk)
         else:
             form = MarkedQuestionForm()
@@ -250,8 +255,9 @@ def edit_quiz_question(request, course_pk, quiz_pk, mq_pk=None):
                 mquestion.update(quiz)
                 mquestion.quiz.update_out_of()
                 # Also update the exemption score, if necessary
-                #exemption, created = ExemptionType.objects.get_or_create(name=mquestion.quiz.name)
-                #exemption.quiz_update_out_of(mquestion.quiz)
+                evaluation, created = Evaluation.objects.get_or_create(
+                        name=mquestion.quiz.name, course=mquestion.quiz.course)
+                evaluation.quiz_update_out_of(mquestion.quiz)
 
                 # Check to see if there are any possible issues with the format of the question
                 return redirect('quiz_admin', course_pk=course_pk, quiz_pk=quiz.pk)
@@ -420,15 +426,16 @@ def search_students(request, course_pk):
                 qs = qs | query
 
             # Filter by course as well
-            users = User.objects.filter(qs).prefetch_related(
+            users = User.objects.filter(
+                    qs, membership__courses__in=[course]).prefetch_related(
                     'membership','membership__courses').distinct()
             ret_list = []
-            for user in users:
-                try:
-                    if course in user.membership.courses.all():
-                        ret_list.append(user)
-                except Exception as e:
-                    continue #membership might not exist
+#            for user in users:
+#                try:
+#                    if course in user.membership.courses.all():
+#                        ret_list.append(user)
+#                except Exception as e:
+#                    continue #membership might not exist
 
             return render(request, 'quizzes/search_students.html',
                 { 'users': ret_list,
@@ -673,7 +680,10 @@ def generate_next_question(sqr):
     # element from quiz.category = sqr.cur_quest, and from that question we then
     # choose a random choice, possibly randomizing yet a third time of the
     # choices are also random
-    question = sqr.quiz.get_random_question(sqr.q_order[sqr.cur_quest-1])
+    try:
+        question = sqr.quiz.get_random_question(sqr.q_order[sqr.cur_quest-1])
+    except IndexError as e:
+        print(e)
 
     # From this question, we now choose a random input choice
     a_choice = question.get_random_choice()
@@ -844,7 +854,9 @@ def display_question(request, course_pk, quiz_pk, sqr_pk, submit=None):
         <<OUTPUT>>
         HttpResponse - renders the quiz question
 
-        Depends: sub_into_question_string, mark_question, generate_next_question
+        <<DEPENDS>> 
+          sub_into_question_string, mark_question,
+          generate_next_question, update_marks
     """
     sqr = StudentQuizResult.objects.select_related('quiz','quiz__course').get(pk=sqr_pk)
     string_answer = ''
@@ -915,7 +927,7 @@ def display_question(request, course_pk, quiz_pk, sqr_pk, submit=None):
                 # the student mark
                 result_table = get_result_table(sqr.result)
                 # We are not tracking marks, so this is commented out
-#                update_marks(sqr) # Call a helper method for updating the student's marks 
+                update_marks(sqr) # Call a helper method for updating the student's marks 
                 RequestConfig(request, paginate={'per_page', 10}).configure(result_table)
                 return render(request, 'quizzes/completed_quiz.html', 
                         {   'sqr': sqr,
@@ -947,6 +959,26 @@ def display_question(request, course_pk, quiz_pk, sqr_pk, submit=None):
           'mc_choices': mc_choices,
          }
     )
+
+def update_marks(quiz_result):
+    """ Helper function for updating quiz marks once a quiz has been completed.
+        Input: quiz_record (StudentQuizResult)
+    """
+    try:
+        evaluation, cr = Evaluation.objects.get_or_create(
+                name=quiz_result.quiz.name, course=quiz_result.quiz.course)
+        # Should rarely need to be triggered, but if a quiz was imported without
+        # creating an evaluation, the first student who writes it will create the
+        # evaluation. Hence we also need to update the out_of
+        if cr: 
+            evaluation.quiz_update_out_of(quiz_result.quiz)
+        cur_grade, created = StudentMark.objects.get_or_create(
+                        user = quiz_result.student,
+                        evaluation = evaluation
+                    )
+        cur_grade.set_score(quiz_result.score, 'HIGH')
+    except Exception as e:
+        print(e)
 
 def get_result_table(result):
     """ Turns the string StudentQuizResults.results and generated a table.
@@ -1275,3 +1307,114 @@ def enroll_course(request):
 
 # --------- Course Administration (end) ------- #
 
+
+# --------- Marks (fold) ------- #
+
+@staff_required()
+def see_marks(request):
+    courses = get_objects_for_user(request.user, 'quizzes.can_edit_quiz')
+
+    return render(request, 'quizzes/see_marks.html',
+        { 'courses': courses }
+    )
+
+@staff_required()
+def download_all_marks(request, course_pk):
+    """ For staff members to download the marks table as a csv file.
+        Depends on: get_marks_data
+    """
+
+    # This effectively starts the same was as the see_all_marks view, but
+    # instead of rendering as a table, we write to a csv and set up a download
+    # link
+    course = get_object_or_404(Course, pk=course_pk)
+    table_data = get_marks_data(course)
+
+    file_name = "{name}_All_grades_by_{user}_{date}.csv".format(
+                    name = course.name,
+                    user = request.user,
+                    date = timezone.now().timestamp())
+    file_path = os.path.join(settings.NOTE_ROOT, file_name)
+
+    # The csv DictWriter needs to know the field names.
+    ident_names = [ 'last_name', 'first_name', 'username', 'number'] 
+    cat_names   = Evaluation.objects.filter(course = course).values_list('name', flat=True)
+    # cat_names will have spaces in them, while table_data stripped spaces
+    cat_names = [cat.replace(' ','') for cat in cat_names]
+    field_names = ident_names + cat_names
+    
+    with open(file_path, 'a+') as csv_file:
+        writer = csv.DictWriter(csv_file, field_names)
+        writer.writeheader()
+        for row in table_data:
+            # Write each row to a csv file
+            writer.writerow(row)
+        
+    return sendfile(request, file_path, attachment=True,
+            attachment_filename=file_name)
+
+@staff_required()
+def see_all_marks(request, course_pk):
+    """ A view for returning all student marks.
+        Depends on: get_marks_data
+    """
+
+    course = get_object_or_404(Course, pk=course_pk)
+    # Generate the table. This is dynamic to the number of categories which currently exists
+    table_data = get_marks_data(course)
+    table = define_all_marks_table()(table_data)
+    RequestConfig(request, paginate=False).configure(table)
+
+    sidenote = format_html("<h4>Options</h4><a class='btn btn-default' href='{}'>Download Marks</a>", 
+                           reverse('download_all_marks', kwargs={'course_pk':course_pk}))
+    return render(request, 'quizzes/list_table.html',
+            {'table': table,
+             'title': 'All Marks',
+             'sidenote': sidenote,
+            })
+
+def get_marks_data(course):
+    """ Helper function for creating the dictionary of student marks. Only looks
+        at active students (non-staff members), and uses their username. 
+        <<INPUT>>
+          course (Course) The course for which to retrieve the marks
+        <<OUTPUT>>
+          Returns (Dict) Dictionary of student data, with fields
+            {last_name, first_name, user_name, number}
+            and a field for each ExemptionType assessment
+        <<DEPENDS>>
+        get_student_marks_for_table
+    """
+    table_data = [];
+    students = User.objects.prefetch_related('marks','membership').filter(
+            membership__courses__in=[course],
+            is_staff=False, is_active=True,
+            )
+    for student in students:
+        try:
+            table_data.append(get_student_marks_for_table(student, course))
+        except Exception as e:
+            print(e)
+
+    return table_data
+
+def get_student_marks_for_table(student, course):
+    """ A helper function which outputs the dictionary of student marks.
+        <<INPUT>>
+        student (User) the student whose marks we are getting
+        <<OUTPUT>>
+        (Dictionary) suitable for entry into django-tables2
+
+        ToDo: Could see_marks benefit from this?
+        Warning: If iterating over students, should prefetch marks
+    """
+    return_dict = {'last_name': student.last_name,
+                   'first_name': student.first_name,
+                   'username': student.username,
+                  }
+    for smark in student.marks.filter(evaluation__course=course).iterator():
+        score = smark.score
+        return_dict[smark.evaluation.name.replace(' ','')]=score
+
+    return return_dict
+# --------- Marks (end) ------- #

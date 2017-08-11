@@ -139,10 +139,12 @@ URL_PREPEND = ''
 SITE_NAME = ''
 SITE_URL = ''
 NOTES_URL = ''
+NOTE_ROOT = '/tmp/'
 MEDIA_URL  = '/media/'
 LATEX_ROOT = '/home/tholden/djangotest/latex'
 LOG_ROOT = '/tmp'
 MARKS_LOG = "/".join([LOG_ROOT, 'marks_log.log'])
+SENDFILE_BACKEND = 'sendfile.backends.development'
 
 # For websockets we need to define the CHANNEL_LAYERS setting
 

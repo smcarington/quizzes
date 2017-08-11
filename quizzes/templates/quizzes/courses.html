@@ -16,11 +16,7 @@
             <a href="{% url 'list_quizzes' course_pk=course.pk %}" class="row-content">
                 {{course.name}}
                 <span class="add-data"> 
-                    {% if course.get_status %}
-                        (Currently Live)
-                    {% else %}
-                        (No Active Quiz)
-                    {% endif %}
+                    ( {{course.status}} )
                 </span>
             </a>
         </div>

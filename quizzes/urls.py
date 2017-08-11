@@ -21,6 +21,18 @@ urlpatterns = [
         views.add_staff_member, 
         name='add_staff_member'
     ),
+    url(r'^administrative/see_marks/$', 
+        views.see_marks, 
+        name='see_marks'
+    ),
+    url(r'^administrative/(?P<course_pk>\d+)/see_all_marks/$', 
+        views.see_all_marks, 
+        name='see_all_marks'
+    ),
+    url(r'^administrative/(?P<course_pk>\d+)/download_all_marks/$', 
+        views.download_all_marks, 
+        name='download_all_marks'
+    ),
     url(r'^administrative/add_students/$', 
         views.add_students, 
         name='add_students'
